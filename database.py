@@ -2,11 +2,9 @@
 database.py - MySQL Database Handler for XAMPP
 Vehicle Violation Management System
 """
-
-import mysql.connector
-from mysql.connector import Error
+import pymysql
 from datetime import datetime
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 
 class ViolationDatabase:
     def __init__(self):
@@ -25,16 +23,17 @@ class ViolationDatabase:
             print(f"    User: root")
             print(f"    Port: 3306")
             
-            self.connection = mysql.connector.connect(
+            self.connection = pymysql.connect(
                 host='localhost',
                 user='root',
                 password='',  # Default XAMPP password is empty
                 port=3306,
-                connect_timeout=10
+                connect_timeout=10,
+                charset='utf8mb4'
             )
             self.cursor = self.connection.cursor()
             print("✓ Connected to MySQL server")
-        except Error as e:
+        except Exception as e:
             error_code = e.errno if hasattr(e, 'errno') else 'Unknown'
             print(f"\n✗ MySQL connection error!")
             print(f"   Error Code: {error_code}")
@@ -55,23 +54,17 @@ class ViolationDatabase:
             self.cursor.execute("USE vehicle_violations_db")
             self.connection.commit()
             print("✓ Connected to existing database: vehicle_violations_db")
-        except Error as e:
+        except Exception as e:
             print(f"✗ Database error: {e}")
             raise Exception(f"Cannot connect to database 'vehicle_violations_db'. Make sure it exists!")
     
     def create_tables(self):
         """Check if violations table exists"""
         try:
-            # Just verify table exists, don't create
+            # Check/create violations table
             self.cursor.execute("SHOW TABLES LIKE 'violations'")
-            result = self.cursor.fetchone()
-            
-            if result:
-                print("✓ Connected to existing 'violations' table")
-            else:
-                print("⚠ Warning: 'violations' table not found!")
-                # Create table if it doesn't exist
-                create_table_query = """
+            if not self.cursor.fetchone():
+                self.cursor.execute("""
                     CREATE TABLE violations (
                         id INT AUTO_INCREMENT PRIMARY KEY,
                         plate_number VARCHAR(20) NOT NULL,
@@ -85,11 +78,26 @@ class ViolationDatabase:
                         notes TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                """
-                self.cursor.execute(create_table_query)
-                self.connection.commit()
+                """)
                 print("✓ Table 'violations' created")
-        except Error as e:
+            
+            # Check/create users table
+            self.cursor.execute("SHOW TABLES LIKE 'users'")
+            if not self.cursor.fetchone():
+                self.cursor.execute("""
+                    CREATE TABLE users (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        username VARCHAR(50) NOT NULL UNIQUE,
+                        email VARCHAR(100) NOT NULL UNIQUE,
+                        password VARCHAR(255) NOT NULL,
+                        role VARCHAR(20) DEFAULT 'officer',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                print("✓ Table 'users' created")
+                
+            self.connection.commit()
+        except Exception as e:
             print(f"✗ Table check error: {e}")
             raise
     
@@ -120,7 +128,7 @@ class ViolationDatabase:
             print(f"✓ Violation created with ID: {violation_id}")
             return violation_id
             
-        except Error as e:
+        except Exception as e:
             print(f"✗ Error creating violation: {e}")
             raise
     
@@ -135,7 +143,7 @@ class ViolationDatabase:
             """
             self.cursor.execute(query)
             return self.cursor.fetchall()
-        except Error as e:
+        except Exception as e:
             print(f"✗ Error fetching violations: {e}")
             return []
     
@@ -154,7 +162,7 @@ class ViolationDatabase:
             search_pattern = f'%{search_term}%'
             self.cursor.execute(query, (search_pattern, search_pattern, search_pattern))
             return self.cursor.fetchall()
-        except Error as e:
+        except Exception as e:
             print(f"✗ Error searching violations: {e}")
             return []
     
@@ -187,7 +195,7 @@ class ViolationDatabase:
                 print(f"✗ No violation found with ID: {violation_id}")
                 return False
                 
-        except Error as e:
+        except Exception as e:
             print(f"✗ Error updating violation: {e}")
             return False
     
@@ -205,9 +213,44 @@ class ViolationDatabase:
                 print(f"✗ No violation found with ID: {violation_id}")
                 return False
                 
-        except Error as e:
+        except Exception as e:
             print(f"✗ Error deleting violation: {e}")
             return False
+    
+    def create_user(self, username: str, email: str, password: str, role: str = 'officer') -> int:
+        """Create a new user account"""
+        try:
+            query = """
+                INSERT INTO users (username, email, password, role)
+                VALUES (%s, %s, %s, %s)
+            """
+            self.cursor.execute(query, (username, email, password, role))
+            self.connection.commit()
+            return self.cursor.lastrowid
+        except Exception as e:
+            print(f"✗ Error creating user: {e}")
+            raise
+    
+    def get_user_by_username(self, username: str) -> Optional[dict]:
+        """Get user by username"""
+        try:
+            query = "SELECT * FROM users WHERE username = %s"
+            self.cursor.execute(query, (username,))
+            result = self.cursor.fetchone()
+            
+            if result:
+                return {
+                    'id': result[0],
+                    'username': result[1],
+                    'email': result[2],
+                    'password': result[3],
+                    'role': result[4],
+                    'created_at': result[5]
+                }
+            return None
+        except Exception as e:
+            print(f"✗ Error fetching user: {e}")
+            return None
     
     def close(self):
         """Close database connection"""
